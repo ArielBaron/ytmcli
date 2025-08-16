@@ -11,6 +11,9 @@ import tty
 import termios
 import select
 import random
+import requests
+from urllib.parse import quote
+
 init(autoreset=True)
 
 # -----------------------------
@@ -71,12 +74,14 @@ def get_audio_url(query, with_title=False, with_duration=False):
             return None
 
 # -----------------------------
-# VLC Control
+# VLC Control with HTTP Interface
 # -----------------------------
 def start_vlc(url):
-    """Start VLC with RC interface"""
+    """Start VLC with HTTP interface"""
     return subprocess.Popen(
-        ["cvlc", "--play-and-exit", "--quiet", "--extraintf", "rc", url],
+        ["cvlc", "--play-and-exit", "--quiet", 
+         "--extraintf", "http", "--http-password", "vlc", "--http-port", "8080",
+         url],
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -86,26 +91,42 @@ def start_vlc(url):
 def force_kill_vlc(vlc_proc):
     if vlc_proc.poll() is None:
         vlc_proc.terminate()
+        time.sleep(0.1)
+        if vlc_proc.poll() is None:
+            vlc_proc.kill()
 
-def control_vlc(vlc_proc, action):
-    """Send RC commands to running VLC"""
-    if not vlc_proc or vlc_proc.poll() is not None:
-        return
-    cmd = ""
-    if action == 'pause':
-        cmd = "pause\n"
-    elif action == 'volume_up':
-        cmd = "volup 1\n"
-    elif action == 'volume_down':
-        cmd = "voldown 1\n"
-    elif action == 'forward':
-        cmd = "seek +5\n"
-    elif action == 'backward':
-        cmd = "seek -5\n"
-    
-    if cmd:
-        vlc_proc.stdin.write(cmd)
-        vlc_proc.stdin.flush()
+def get_vlc_status():
+    """Get current VLC status via HTTP interface"""
+    try:
+        response = requests.get("http://:vlc@localhost:8080/requests/status.json", timeout=1)
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                'time': data.get('time', 0),  # Current time in seconds
+                'length': data.get('length', 0),  # Total length in seconds
+                'state': data.get('state', 'stopped'),  # playing, paused, stopped
+                'volume': data.get('volume', 256)  # Volume level
+            }
+    except:
+        pass
+    return None
+
+def control_vlc_http(action, value=None):
+    """Send HTTP commands to VLC"""
+    try:
+        base_url = "http://:vlc@localhost:8080/requests/status.json"
+        
+        if action == 'pause':
+            requests.get(f"{base_url}?command=pl_pause", timeout=1)
+        elif action == 'volume_up':
+            requests.get(f"{base_url}?command=volume&val=+10", timeout=1)
+        elif action == 'volume_down':
+            requests.get(f"{base_url}?command=volume&val=-10", timeout=1)
+        elif action == 'seek':
+            if value:
+                requests.get(f"{base_url}?command=seek&val={value}", timeout=1)
+    except:
+        pass
 
 # -----------------------------
 # Input / Screen
@@ -139,10 +160,29 @@ def display_progress(duration, elapsed, percent):
     print(f'[{bar}] {elapsed_min:02d}:{elapsed_sec:02d} / {duration_min:02d}:{duration_sec:02d} '
           f'[{percent:.1f}%] [{remaining_min:02d}:{remaining_sec:02d} remaining]')
 
+def display_volume(volume):
+    # VLC volume ranges from 0-512, normalize to 0-100
+    vol_percent = min(100, int((volume / 512) * 100))
+    bar_length = 20
+    filled = int(bar_length * vol_percent / 100)
+    
+    vol_bar = '█' * filled + '░' * (bar_length - filled)
+    
+    if vol_percent == 0:
+        vol_icon = "🔇"
+    elif vol_percent < 30:
+        vol_icon = "🔈"
+    elif vol_percent < 70:
+        vol_icon = "🔉"
+    else:
+        vol_icon = "🔊"
+    
+    print(f'{vol_icon} Volume: [{vol_bar}] {vol_percent}%')
+
 def display_controls():
     controls = [
         "Press i to increase volume",
-        "Press o to decrease volume",
+        "Press o to decrease volume", 
         "Press l to move forwards 5s",
         "Press k to move backwards 5s",
         "Press p to pause/unpause",
@@ -150,24 +190,52 @@ def display_controls():
     ]
     return "\n".join(controls)
 
-def draw_screen(vlc_proc, duration, title):
-    start_time = time.time()
+def draw_screen(vlc_proc, title):
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     tty.setcbreak(fd)
 
     try:
         while vlc_proc.poll() is None:
-            elapsed = time.time() - start_time
-            percent = min(100, (elapsed / duration * 100)) if duration else 0
+            status = get_vlc_status()
+            
+            if status:
+                elapsed = status['time']
+                duration = status['length'] 
+                state = status['state']
+                
+                if duration > 0:
+                    percent = min(100, (elapsed / duration * 100))
+                else:
+                    percent = 0
+                    duration = 0
+            else:
+                # Fallback if HTTP interface isn't responding
+                elapsed = 0
+                duration = 0
+                percent = 0
+                state = 'unknown'
 
             sys.stdout.write('\033[2J\033[H')  # Clear screen
             if title:
-                print(Fore.GREEN + Style.BRIGHT + f"Title: {title}\n")
+                print(Fore.GREEN + Style.BRIGHT + f"Title: {title}")
+            
+            if state == 'paused':
+                print(Fore.YELLOW + Style.BRIGHT + "⏸  PAUSED")
+            elif state == 'playing':
+                print(Fore.GREEN + Style.BRIGHT + "▶  PLAYING")
+            else:
+                print(Fore.RED + Style.BRIGHT + f"State: {state}")
+            
+            print()  # Empty line
             display_progress(duration, elapsed, percent)
+            if status:
+                display_volume(status['volume'])
+            print()  # Empty line
             print(display_controls())
             sys.stdout.flush()
-            time.sleep(0.1)
+            
+            time.sleep(0.5)  # Update every 500ms
 
             if select.select([sys.stdin], [], [], 0)[0]:
                 key = sys.stdin.read(1).lower()
@@ -175,22 +243,23 @@ def draw_screen(vlc_proc, duration, title):
                     force_kill_vlc(vlc_proc)
                     os._exit(0)
                 elif key == 'i':
-                    control_vlc(vlc_proc, 'volume_up')
+                    control_vlc_http('volume_up')
                 elif key == 'o':
-                    control_vlc(vlc_proc, 'volume_down')
+                    control_vlc_http('volume_down')
                 elif key == 'l':
-                    control_vlc(vlc_proc, 'forward')
+                    control_vlc_http('seek', '+5')
                 elif key == 'k':
-                    control_vlc(vlc_proc, 'backward')
+                    control_vlc_http('seek', '-5')
                 elif key == 'p':
-                    control_vlc(vlc_proc, 'pause')
+                    control_vlc_http('pause')
+                    
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 # -----------------------------
 # Playback Handler
 # -----------------------------
-def handle_playback(vlc_proc, duration=None, title=None):
+def handle_playback(vlc_proc, title=None):
     def signal_handler(sig, frame):
         force_kill_vlc(vlc_proc)
         os._exit(0)
@@ -198,10 +267,11 @@ def handle_playback(vlc_proc, duration=None, title=None):
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    screen_thread = None
-    if duration is not None:
-        screen_thread = threading.Thread(target=draw_screen, args=(vlc_proc, duration, title), daemon=True)
-        screen_thread.start()
+    # Wait a moment for VLC to start up
+    time.sleep(2)
+    
+    screen_thread = threading.Thread(target=draw_screen, args=(vlc_proc, title), daemon=True)
+    screen_thread.start()
 
     try:
         vlc_proc.wait()
@@ -216,7 +286,13 @@ def play(is_cli, *args):
     if not is_cli:
         query = " ".join(args)
         if query == ":r":
-            query = random.choice(["https://www.youtube.com/watch?v=482tDopNzoc","https://www.youtube.com/watch?v=uaFzmZrKKKw","https://www.youtube.com/watch?v=7qqcZIHxyRI","https://www.youtube.com/watch?v=Cr4gKVsqh9o","https://www.youtube.com/watch?v=TnRZhLRv6eM"])
+            query = random.choice([
+                "https://www.youtube.com/watch?v=482tDopNzoc",
+                "https://www.youtube.com/watch?v=uaFzmZrKKKw",
+                "https://www.youtube.com/watch?v=7qqcZIHxyRI",
+                "https://www.youtube.com/watch?v=Cr4gKVsqh9o",
+                "https://www.youtube.com/watch?v=TnRZhLRv6eM"
+            ])
         url = get_audio_url(query)
         if not url:
             return 1
@@ -229,14 +305,20 @@ def play(is_cli, *args):
         print(Fore.CYAN + "Press 'q' to quit, or Ctrl+C")
         query = input(Fore.YELLOW + Style.BRIGHT + "♫ Enter song > " + Style.RESET_ALL)
         if query == ":r":
-            query = random.choice(["https://www.youtube.com/watch?v=482tDopNzoc","https://www.youtube.com/watch?v=uaFzmZrKKKw","https://www.youtube.com/watch?v=7qqcZIHxyRI","https://www.youtube.com/watch?v=Cr4gKVsqh9o","https://www.youtube.com/watch?v=TnRZhLRv6eM"])
+            query = random.choice([
+                "https://www.youtube.com/watch?v=482tDopNzoc",
+                "https://www.youtube.com/watch?v=uaFzmZrKKKw",
+                "https://www.youtube.com/watch?v=7qqcZIHxyRI",
+                "https://www.youtube.com/watch?v=Cr4gKVsqh9o",
+                "https://www.youtube.com/watch?v=TnRZhLRv6eM"
+            ])
         url, title, duration = get_audio_url(query, with_title=True, with_duration=True)
         if not url:
             return 1
         if title:
             print(Fore.GREEN + Style.BRIGHT + f"Title: {title}")
         vlc_proc = start_vlc(url)
-        handle_playback(vlc_proc, duration, title)
+        handle_playback(vlc_proc, title)
 
 # -----------------------------
 # Entry
