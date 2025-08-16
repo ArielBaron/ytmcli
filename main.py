@@ -75,43 +75,67 @@ def force_kill_vlc(vlc_proc):
     vlc_proc.terminate()
 
 def display_progress(vlc_proc, duration):
-    """Display and update progress bar with smooth continuous movement"""
+    """Display a smoothly moving progress bar like a video player"""
     start_time = time.time()
-    last_update = start_time
     try:
         while vlc_proc.poll() is None:  # While VLC is still running
-            current_time = time.time()
-            elapsed = current_time - start_time
-            
-            # Calculate precise percentage
+            elapsed = time.time() - start_time
             percent = min(100, (elapsed / duration * 100)) if duration else 0
             
-            # Create progress bar
+            # Progress bar setup
             bar_length = 30
-            filled_length = bar_length * percent / 100
+            exact_position = bar_length * percent / 100
             
-            # Split into whole and fractional parts for smooth movement
-            whole_fill = int(filled_length)
-            partial_fill = filled_length - whole_fill
+            # Split into whole and fractional parts
+            whole_part = int(exact_position)
+            fractional_part = exact_position - whole_part
             
-            # Use different characters for partial fill
-            partial_chars = [' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉']
-            partial_char = partial_chars[int(partial_fill * 8)]
+            # Create smooth gradient effect
+            bar = '█' * whole_part
             
-            # Construct the bar
-            bar = "█" * whole_fill + partial_char + "-" * (bar_length - whole_fill - 1)
+            # Add fractional part with smooth transition
+            if fractional_part > 0:
+                # Use different block characters for smooth transition
+                if fractional_part <= 0.125:
+                    bar += ' '
+                elif fractional_part <= 0.25:
+                    bar += '▏'
+                elif fractional_part <= 0.375:
+                    bar += '▎'
+                elif fractional_part <= 0.5:
+                    bar += '▍'
+                elif fractional_part <= 0.625:
+                    bar += '▌'
+                elif fractional_part <= 0.75:
+                    bar += '▋'
+                elif fractional_part <= 0.875:
+                    bar += '▊'
+                else:
+                    bar += '▉'
             
-            # Format time as MM:SS with precise seconds
+            # Fill remaining space
+            remaining_space_char = ' '
+            remaining_length = bar_length - len(bar)
+            if remaining_length > 0:
+                bar += remaining_space_char * remaining_length
+            
+            # Format time
             elapsed_min, elapsed_sec = divmod(int(elapsed), 60)
             duration_min, duration_sec = divmod(int(duration), 60) if duration else (0, 0)
             
-            # Print progress bar
+            # Calculate remaining time
+            remaining = max(0, duration - elapsed)
+            remaining_min, remaining_sec = divmod(int(remaining), 60)
+            
+            # Clear line and print progress bar
+            sys.stdout.write('\r\033[K')  # Clear the entire line
             sys.stdout.write(
-                f'\r[{bar}] | {elapsed_min:02d}:{elapsed_sec:02d}/{duration_min:02d}:{duration_sec:02d}'
+                f'[{bar}] {elapsed_min:02d}:{elapsed_sec:02d} / {duration_min:02d}:{duration_sec:02d} '
+                f'[{percent:.1f}%] [{remaining_min:02d}:{remaining_sec:02d} remaining]'
             )
             sys.stdout.flush()
             
-            # Update every 100ms for smooth movement
+            # Update frequently for smooth movement
             time.sleep(0.1)
         
         # Print newline when done
