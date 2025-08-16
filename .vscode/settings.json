@@ -3,5 +3,6 @@
     "Codegeex.SidebarUI.LanguagePreference": "English",
     "Codegeex.Comment.LanguagePreference": "English",
     "Codegeex.CommitMessage.LanguagePreference": "English",
-    "Codegeex.CompletionDelay": 3
+    "Codegeex.CompletionDelay": 3,
+    "Codegeex.Chat.fontSize": 13
 }

@@ -74,73 +74,92 @@ def force_kill_vlc(vlc_proc):
     # First try terminate (SIGTERM)
     vlc_proc.terminate()
 
-def display_progress(vlc_proc, duration):
-    """Display a smoothly moving progress bar like a video player"""
+def display_progress(vlc_proc, duration, elapsed, percent):
+    """Display only the progress bar part"""
+    # Progress bar setup
+    bar_length = 30
+    exact_position = bar_length * percent / 100
+    
+    # Split into whole and fractional parts
+    whole_part = int(exact_position)
+    fractional_part = exact_position - whole_part
+    
+    # Create smooth gradient effect
+    bar = '█' * whole_part
+    
+    # Add fractional part with smooth transition
+    if fractional_part > 0:
+        if fractional_part <= 0.125:
+            bar += ' '
+        elif fractional_part <= 0.25:
+            bar += '▏'
+        elif fractional_part <= 0.375:
+            bar += '▎'
+        elif fractional_part <= 0.5:
+            bar += '▍'
+        elif fractional_part <= 0.625:
+            bar += '▌'
+        elif fractional_part <= 0.75:
+            bar += '▋'
+        elif fractional_part <= 0.875:
+            bar += '▊'
+        else:
+            bar += '▉'
+    
+    # Fill remaining space
+    remaining_space_char = ' '
+    remaining_length = bar_length - len(bar)
+    if remaining_length > 0:
+        bar += remaining_space_char * remaining_length
+    
+    # Format time
+    elapsed_min, elapsed_sec = divmod(int(elapsed), 60)
+    duration_min, duration_sec = divmod(int(duration), 60) if duration else (0, 0)
+    
+    # Calculate remaining time
+    remaining = max(0, duration - elapsed)
+    remaining_min, remaining_sec = divmod(int(remaining), 60)
+    
+    # Print progress bar
+    sys.stdout.write(
+        f'[{bar}] {elapsed_min:02d}:{elapsed_sec:02d} / {duration_min:02d}:{duration_sec:02d} '
+        f'[{percent:.1f}%] [{remaining_min:02d}:{remaining_sec:02d} remaining]\n'
+    )
+
+def display_controls():
+    """Display control instructions at the bottom of the screen"""
+    controls = [
+        "Press ↑/i to increase volume",
+        "Press ↓/o to decrease volume",
+        "Press p to pause/unpause",
+        "Press q to quit"
+    ]
+    return "\n".join(controls)
+
+def draw_screen(vlc_proc, duration, title):
+    """Draw the complete screen with title, progress bar and controls"""
     start_time = time.time()
     try:
         while vlc_proc.poll() is None:  # While VLC is still running
             elapsed = time.time() - start_time
             percent = min(100, (elapsed / duration * 100)) if duration else 0
             
-            # Progress bar setup
-            bar_length = 30
-            exact_position = bar_length * percent / 100
+            # Clear screen
+            sys.stdout.write('\033[2J\033[H')  # Clear screen and move cursor to top
             
-            # Split into whole and fractional parts
-            whole_part = int(exact_position)
-            fractional_part = exact_position - whole_part
+            # Display title if available
+            if title:
+                print(Fore.GREEN + Style.BRIGHT + f"Title: {title}")
+                print()  # Add a blank line after title
             
-            # Create smooth gradient effect
-            bar = '█' * whole_part
+            # Display progress bar
+            display_progress(vlc_proc, duration, elapsed, percent)
             
-            # Add fractional part with smooth transition
-            if fractional_part > 0:
-                # Use different block characters for smooth transition
-                if fractional_part <= 0.125:
-                    bar += ' '
-                elif fractional_part <= 0.25:
-                    bar += '▏'
-                elif fractional_part <= 0.375:
-                    bar += '▎'
-                elif fractional_part <= 0.5:
-                    bar += '▍'
-                elif fractional_part <= 0.625:
-                    bar += '▌'
-                elif fractional_part <= 0.75:
-                    bar += '▋'
-                elif fractional_part <= 0.875:
-                    bar += '▊'
-                else:
-                    bar += '▉'
+            # Display controls
+            print(display_controls())
             
-            # Fill remaining space
-            remaining_space_char = ' '
-            remaining_length = bar_length - len(bar)
-            if remaining_length > 0:
-                bar += remaining_space_char * remaining_length
-            
-            # Format time
-            elapsed_min, elapsed_sec = divmod(int(elapsed), 60)
-            duration_min, duration_sec = divmod(int(duration), 60) if duration else (0, 0)
-            
-            # Calculate remaining time
-            remaining = max(0, duration - elapsed)
-            remaining_min, remaining_sec = divmod(int(remaining), 60)
-            
-            # Clear line and print progress bar
-            sys.stdout.write('\r\033[K')  # Clear the entire line
-            sys.stdout.write(
-                f'[{bar}] {elapsed_min:02d}:{elapsed_sec:02d} / {duration_min:02d}:{duration_sec:02d} '
-                f'[{percent:.1f}%] [{remaining_min:02d}:{remaining_sec:02d} remaining]'
-            )
             sys.stdout.flush()
-            
-            # Update frequently for smooth movement
             time.sleep(0.1)
-        
-        # Print newline when done
-        sys.stdout.write('\n')
-        sys.stdout.flush()
     except KeyboardInterrupt:
         sys.stdout.write('\n')
         sys.stdout.flush()
@@ -156,7 +175,7 @@ def monitor_quit(vlc_proc):
             force_kill_vlc(vlc_proc)
             os._exit(0)
 
-def handle_playback(vlc_proc, duration=None):
+def handle_playback(vlc_proc, duration=None, title=None):
     # Set up signal handlers for Ctrl+C
     def signal_handler(sig, frame):
         force_kill_vlc(vlc_proc)
@@ -169,11 +188,11 @@ def handle_playback(vlc_proc, duration=None):
     quit_thread = threading.Thread(target=monitor_quit, args=(vlc_proc,), daemon=True)
     quit_thread.start()
     
-    # Start progress bar thread if duration is available (CLI mode)
-    progress_thread = None
+    # Start screen drawing thread if duration is available (CLI mode)
+    screen_thread = None
     if duration is not None:
-        progress_thread = threading.Thread(target=display_progress, args=(vlc_proc, duration), daemon=True)
-        progress_thread.start()
+        screen_thread = threading.Thread(target=draw_screen, args=(vlc_proc, duration, title), daemon=True)
+        screen_thread.start()
     
     # Wait for VLC to finish or be killed
     try:
@@ -202,7 +221,7 @@ def play(is_cli, *args):
         if title:
             print(Fore.GREEN + Style.BRIGHT + f"Title: {title}")
         vlc_proc = start_vlc(url)
-        handle_playback(vlc_proc, duration)
+        handle_playback(vlc_proc, duration, title)
 
 if __name__ == "__main__":
     is_cli = len(sys.argv) == 1
