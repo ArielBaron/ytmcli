@@ -10,13 +10,12 @@ def play(*args):
 
     query = " ".join(args)
 
-    # Get direct audio URL from YouTube
+    # Get direct audio URL from yt-dlp
     try:
         result = subprocess.run(
             ["yt-dlp", "-f", "bestaudio", "-g", f"ytsearch:{query}"],
-            stdout=subprocess.PIPE,
-            text=False,
-            stderr=subprocess.DEVNULL
+            capture_output=True,
+            text=True
         )
         url = result.stdout.strip()
         if not url:
@@ -26,8 +25,12 @@ def play(*args):
         print(f"Error getting URL: {e}")
         return 1
 
-    # Start VLC in subprocess
-    vlc_proc = subprocess.Popen(["cvlc", "--play-and-exit", "--quiet", url])
+    # Start VLC in subprocess (suppress output completely)
+    vlc_proc = subprocess.Popen(
+        ["cvlc", "--play-and-exit", "--quiet", url],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
 
     # Function to monitor keyboard for 'q'
     def monitor_quit():
@@ -37,11 +40,7 @@ def play(*args):
                 vlc_proc.terminate()
                 break
 
-    # Start monitor in separate thread
-    thread = threading.Thread(target=monitor_quit, daemon=True)
-    thread.start()
-
-    # Wait for VLC to finish
+    threading.Thread(target=monitor_quit, daemon=True).start()
     vlc_proc.wait()
 
 if __name__ == "__main__":
