@@ -3,8 +3,43 @@ import sys
 import termios
 import tty
 import select
+import threading
+import numpy as np
+import pyaudio
 from colorama import Fore, Style
 from vlc_client import control, get_status, force_kill_vlc
+
+# Audio visualizer settings
+CHUNK = 1024
+WIDTH = 30  # Number of bars
+
+def get_audio_levels():
+    """Capture system audio and return FFT-based bar heights."""
+    p = pyaudio.PyAudio()
+    try:
+        stream = p.open(format=pyaudio.paInt16,
+                        channels=1,
+                        rate=44100,
+                        input=True,
+                        frames_per_buffer=CHUNK)
+        while True:
+            data = np.frombuffer(stream.read(CHUNK, exception_on_overflow=False), dtype=np.int16)
+            fft_vals = np.abs(np.fft.rfft(data))[:WIDTH]
+            fft_vals = fft_vals / np.max(fft_vals) if np.max(fft_vals) > 0 else fft_vals
+            yield fft_vals
+    finally:
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+
+def draw_bars(levels):
+    """Return a string of bars for terminal display."""
+    symbols = '▁▂▃▄▅▆▇█'
+    bar_str = ''
+    for val in levels:
+        index = int(val * (len(symbols) - 1))
+        bar_str += symbols[index]
+    return bar_str
 
 def display_progress(duration, elapsed, percent):
     bar_length = 30
@@ -34,9 +69,8 @@ def display_volume(volume):
     bar_length = 20
     filled = int(bar_length * min(100, vol_percent) / 100)
     vol_bar = '█' * filled + '░' * (bar_length - filled)
-    vol_icon = "🔇" if vol_percent == 0 else "🔈" if vol_percent < 30 else "🔉" if vol_percent < 70 else "🔊"
     suffix = " (AMPLIFIED)" if vol_percent > 100 else ""
-    print(f'{vol_icon} Volume: [{vol_bar}] {vol_percent}%{suffix}')
+    print(f'[{vol_bar}] {vol_percent}%{suffix} VOL')
 
 def display_controls():
     return "\n".join([
@@ -52,6 +86,8 @@ def draw_screen(vlc_proc, title=None):
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     tty.setcbreak(fd)
+
+    audio_levels = get_audio_levels()
     try:
         while vlc_proc.poll() is None:
             status = get_status()
@@ -60,7 +96,14 @@ def draw_screen(vlc_proc, title=None):
             state = status['state'] if status else 'unknown'
             percent = min(100, (elapsed / duration * 100)) if duration > 0 else 0
 
+            # Clear screen
             sys.stdout.write('\033[2J\033[H')
+
+            # Draw visualizer
+            levels = next(audio_levels)
+            print(Fore.CYAN + draw_bars(levels))
+
+            # Draw playback state
             if state == 'paused':
                 print(Fore.YELLOW + Style.BRIGHT + "⏸  PAUSED")
             elif state == 'playing':
@@ -79,6 +122,7 @@ def draw_screen(vlc_proc, title=None):
             print(display_controls())
             sys.stdout.flush()
 
+            # Handle key input
             if select.select([sys.stdin], [], [], 0)[0]:
                 key = sys.stdin.read(1).lower()
                 if key == '\x1b':
