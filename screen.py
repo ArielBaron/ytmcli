@@ -2,12 +2,10 @@
 import sys
 import termios
 import tty
-import select
 import shutil
-import subprocess
 from colorama import Fore, Back, Style
-from vlc_client import control, get_status, force_kill_vlc
-from history import YTMCLIHistory
+from vlc_client import get_status
+from controls import handle_input 
 # Terminal settings
 WIDTH = min(shutil.get_terminal_size().columns // 2, 100)
 HEIGHT = min(shutil.get_terminal_size().lines // 2, 20)
@@ -93,23 +91,7 @@ def draw_screen(vlc_proc, title=None):
             sys.stdout.flush()
 
             # Handle input
-            history = YTMCLIHistory()
-            if select.select([sys.stdin], [], [], 0)[0]:
-                key = sys.stdin.read(1).lower()
-                if key == '\x1b':
-                    key += sys.stdin.read(2)
-                    if key == '\x1b[A': control('volume_up')
-                    elif key == '\x1b[B': control('volume_down')
-                    elif key == '\x1b[C': control('seek', '+5')
-                    elif key == '\x1b[D': control('seek', '-5')
-                elif key == 'q':
-                    force_kill_vlc(vlc_proc)
-                    return 'user pressed q'
-                elif key == 'i': control('volume_up')
-                elif key == 'o': control('volume_down')
-                elif key == 'l': control('seek', '+5')
-                elif key == 'k': control('seek', '-5')
-                elif key == 'p': control('pause')
-                elif key == 'r': history.delete_last()
+            handle_input(sys.stdin, vlc_proc)
+
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
