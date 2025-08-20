@@ -91,7 +91,8 @@ def draw_screen(vlc_proc, title=None):
             sys.stdout.flush()
 
             # Handle input
-            handle_input(sys.stdin, vlc_proc)
+            error = handle_input(sys.stdin, vlc_proc)
 
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return error
