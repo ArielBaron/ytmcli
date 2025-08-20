@@ -11,15 +11,32 @@ from history import YTMCLIHistory
 init(autoreset=True)
 
 def handle_playback(vlc_proc, title=None):
-    screen_thread = threading.Thread(target=draw_screen, args=(vlc_proc, title))
+    """
+    Starts the visualizer thread and waits for VLC playback.
+    Returns True if playback was stopped by user (q or Ctrl+C), False otherwise.
+    """
+    stopped_by_user = False
+
+    def screen_runner():
+        nonlocal stopped_by_user
+        try:
+            error = draw_screen(vlc_proc, title)
+        except KeyboardInterrupt:
+            stopped_by_user = True
+        stopped_by_user = error is not None
+    screen_thread = threading.Thread(target=screen_runner)
     screen_thread.start()
 
     try:
         vlc_proc.wait()
     except KeyboardInterrupt:
         force_kill_vlc(vlc_proc)
+        stopped_by_user = True
     finally:
-        screen_thread.join()
+        if screen_thread.is_alive():
+            screen_thread.join()
+
+    return stopped_by_user
 
 def resolve_special_query(query: str, history: YTMCLIHistory):
     entries = history.all()
@@ -32,7 +49,6 @@ def resolve_special_query(query: str, history: YTMCLIHistory):
         return random.choice(entries)
 
     if cmd == "l":
-        # limit to last 20 entries
         for i, entry in enumerate(entries[-20:][::-1], 1):
             print(f"{i}: {entry}")
         return None
@@ -71,18 +87,30 @@ def play(is_cli, *args):
     print(Fore.CYAN + "Press 'q' to quit, or Ctrl+C")
 
     while True:
-        query = input(Fore.YELLOW + Style.BRIGHT + "♫ Enter song > " + Style.RESET_ALL)
+        try:
+            query = input(Fore.YELLOW + Style.BRIGHT + "♫ Enter song > " + Style.RESET_ALL)
+        except (EOFError, ValueError, KeyboardInterrupt):
+            print()
+            break
+
         if query.lower() == "q":
             break
 
         query = resolve_special_query(query, history)
         if not query:
-            continue  # special command handled, ask again
+            continue  # special command handled
 
-        url, title, _ = get_audio_url(query, with_title=True, with_duration=True)
+        try:
+            url, title, _ = get_audio_url(query, with_title=True, with_duration=True)
+        except Exception as e:
+            print(Fore.RED + f"Error getting audio: {e}")
+            continue
+
         if url:
             history.add(query)
-            handle_playback(start_vlc(url), title)
+            stopped = handle_playback(start_vlc(url), title)
+            if stopped:
+                break  # quit CLI if user pressed q during playback
 
 if __name__ == "__main__":
     is_cli = (len(sys.argv) == 1)

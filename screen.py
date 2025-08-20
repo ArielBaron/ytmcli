@@ -58,13 +58,6 @@ def draw_screen(vlc_proc, title=None):
     old_settings = termios.tcgetattr(fd)
     tty.setcbreak(fd)
 
-    # Launch CAVA subprocess
-    cava_proc = subprocess.Popen(
-        ['cava', '-p', 'default'],  # optionally specify config path
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        universal_newlines=True
-    )
 
     try:
         while vlc_proc.poll() is None:
@@ -96,13 +89,6 @@ def draw_screen(vlc_proc, title=None):
             print(display_controls())
             print()
 
-            # Print CAVA output
-            if cava_proc.stdout:
-                try:
-                    cava_frame = [cava_proc.stdout.readline() for _ in range(HEIGHT)]
-                    print(''.join(cava_frame))
-                except Exception:
-                    pass
 
             sys.stdout.flush()
 
@@ -118,8 +104,7 @@ def draw_screen(vlc_proc, title=None):
                     elif key == '\x1b[D': control('seek', '-5')
                 elif key == 'q':
                     force_kill_vlc(vlc_proc)
-                    cava_proc.terminate()
-                    exit(0)
+                    return 'user pressed q'
                 elif key == 'i': control('volume_up')
                 elif key == 'o': control('volume_down')
                 elif key == 'l': control('seek', '+5')
@@ -128,5 +113,3 @@ def draw_screen(vlc_proc, title=None):
                 elif key == 'r': history.delete_last()
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        if cava_proc.poll() is None:
-            cava_proc.terminate()
