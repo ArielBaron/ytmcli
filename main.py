@@ -12,7 +12,7 @@ init(autoreset=True)
 
 def handle_playback(vlc_proc, title=None):
     """
-    Starts the visualizer thread and waits for VLC playback.
+    Starts the visualizer thread and waits for VLC playback. abc
     Returns True if playback was stopped by user (q or Ctrl+C), False otherwise.
     """
     stopped_by_user = False
