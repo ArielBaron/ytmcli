@@ -209,7 +209,7 @@ class MusicPlayerScreen:
                 # Handle input
                 error = handle_input(sys.stdin, vlc_proc)
                 if error:
-                    break
+                   return error; 
 
                 # Control refresh rate
                 time.sleep(refresh_rate)

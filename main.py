@@ -23,7 +23,8 @@ def handle_playback(vlc_proc, title=None):
             error = draw_screen(vlc_proc, title)
         except KeyboardInterrupt:
             stopped_by_user = True
-        stopped_by_user = error is not None
+        
+        stopped_by_user = error == 'quit'
     screen_thread = threading.Thread(target=screen_runner)
     screen_thread.start()
 
@@ -110,7 +111,9 @@ def play(is_cli, *args):
             history.add(query)
             stopped = handle_playback(start_vlc(url), title)
             if stopped:
-                break  # quit CLI if user pressed q during playback
+                sys.exit(0)
+                exit()
+                quit()
 
 if __name__ == "__main__":
     is_cli = (len(sys.argv) == 1)
