@@ -19,7 +19,7 @@ except ImportError:
 
 # Import your existing modules
 try:
-    from vlc_client import get_status
+    from mpv_client import get_status
     from controls import handle_input
 except ImportError:
     # Fallback functions for testing
@@ -207,8 +207,10 @@ class MusicPlayerScreen:
                 self.render_frame(status, title, show_visualizer=True)
 
                 # Handle input
+
                 error = handle_input(sys.stdin, vlc_proc)
                 if error:
+                   self.restore_terminal()
                    return error; 
 
                 # Control refresh rate

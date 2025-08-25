@@ -1,6 +1,6 @@
 import select
 from history import YTMCLIHistory
-from vlc_client import control, force_kill_vlc
+from mpv_client import control, force_kill_vlc
 
 def handle_input(system_input, vlc_proc):
     """
@@ -11,7 +11,6 @@ def handle_input(system_input, vlc_proc):
     - vlc_proc: VLC process instance to control playback.
 
     Behavior:
-    - Maps specific keypresses (arrows, i/o/l/k/p/r/s/q) to VLC actions or history updates.
     - Non-blocking: returns immediately if no input is available.
     - Returns:
         - "quit" if user pressed q
